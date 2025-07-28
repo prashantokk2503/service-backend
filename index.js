@@ -1,57 +1,62 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-let providers = []; // memory me data temporarily rakhenge
-
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
-// Signup endpoint
+let providers = []; // In-memory provider data
+let ratings = {};   // { mobile: [4, 5, 3] }
+
 app.post("/signup", (req, res) => {
-  const { name, photo, phone, password, description, lat, lng, category } = req.body;
-  const newProvider = { name, photo, phone, password, description, lat, lng, category, rating: 0 };
-  providers.push(newProvider);
-  res.json({ success: true, message: "Provider saved." });
+    const { name, mobile, password, category, photo, description } = req.body;
+    if (providers.find(p => p.mobile === mobile)) {
+        return res.status(400).json({ message: "Mobile number already registered" });
+    }
+    providers.push({ name, mobile, password, category, photo, description });
+    res.json({ message: "Signup successful" });
 });
 
-// Get nearby providers with category filter
-app.get("/nearby", (req, res) => {
-  const { lat, lng, category } = req.query;
-  const userLat = parseFloat(lat);
-  const userLng = parseFloat(lng);
-
-  function getDistance(lat1, lng1, lat2, lng2) {
-    const toRad = x => (x * Math.PI) / 180;
-    const R = 6371;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  const nearby = providers.filter(p => {
-    const d = getDistance(userLat, userLng, p.lat, p.lng);
-    return d <= 2 && (category === "" || p.category === category);
-  });
-
-  res.json(nearby);
+app.post("/login", (req, res) => {
+    const { mobile, password } = req.body;
+    const provider = providers.find(p => p.mobile === mobile && p.password === password);
+    if (provider) {
+        res.json({ message: "Login successful", provider });
+    } else {
+        res.status(401).json({ message: "Invalid mobile or password" });
+    }
 });
 
-// Add rating to provider
+app.put("/update", (req, res) => {
+    const { mobile, name, password, category, photo, description } = req.body;
+    const index = providers.findIndex(p => p.mobile === mobile);
+    if (index === -1) return res.status(404).json({ message: "Provider not found" });
+
+    providers[index] = { mobile, name, password, category, photo, description };
+    res.json({ message: "Update successful" });
+});
+
+app.get("/providers", (req, res) => {
+    const withRating = providers.map(p => {
+        const avgRating = ratings[p.mobile]?.length
+            ? ratings[p.mobile].reduce((a, b) => a + b, 0) / ratings[p.mobile].length
+            : 0;
+        return { ...p, rating: avgRating.toFixed(1) };
+    });
+    res.json(withRating);
+});
+
 app.post("/rate", (req, res) => {
-  const { phone, rating } = req.body;
-  const p = providers.find(p => p.phone === phone);
-  if (p) {
-    p.rating = rating;
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ error: "Provider not found" });
-  }
+    const { mobile, rating } = req.body;
+    if (!ratings[mobile]) ratings[mobile] = [];
+    ratings[mobile].push(rating);
+    res.json({ message: "Rating saved" });
 });
 
+app.get("/ratings", (req, res) => {
+    res.json(ratings);
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Server running on", PORT);
+    console.log(`Backend running on port ${PORT}`);
 });
