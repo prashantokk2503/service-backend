@@ -1,47 +1,55 @@
-const express = require("express");
-const fs = require("fs");
-const cors = require("cors");
-const app = express();
-const PORT = process.env.PORT || 3000;
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 
+const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Path to the JSON file
-const filePath = "providers.json";
+const BIN_ID = '68873c847b4b8670d8a87b72';
+const MASTER_KEY = '$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy';
+const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-// Helper to read providers
-const readProviders = () => {
-  if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, "[]");
-  const data = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(data);
-};
-
-// Helper to write providers
-const writeProviders = (data) => {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-};
-
-// Signup provider
-app.post("/providers", (req, res) => {
-  const newProvider = req.body;
-  const providers = readProviders();
-
-  // Check duplicate by phone
-  const exists = providers.find(p => p.phone === newProvider.phone);
-  if (exists) return res.status(400).json({ message: "Already exists" });
-
-  providers.push(newProvider);
-  writeProviders(providers);
-  res.json({ message: "Provider added successfully" });
+// ✅ GET all providers
+app.get('/providers', async (req, res) => {
+  try {
+    const response = await axios.get(BASE_URL + '/latest', {
+      headers: { 'X-Master-Key': MASTER_KEY }
+    });
+    res.json(response.data.record || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch providers' });
+  }
 });
 
-// Get all providers
-app.get("/providers", (req, res) => {
-  const providers = readProviders();
-  res.json(providers);
+// ✅ POST new provider
+app.post('/providers', async (req, res) => {
+  try {
+    const newProvider = req.body;
+
+    // Get current data
+    const current = await axios.get(BASE_URL + '/latest', {
+      headers: { 'X-Master-Key': MASTER_KEY }
+    });
+
+    const updatedData = [...(current.data.record || []), newProvider];
+
+    // Update Bin
+    await axios.put(BASE_URL, updatedData, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': MASTER_KEY
+      }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: 'Failed to save provider' });
+  }
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
