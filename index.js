@@ -1,107 +1,41 @@
-const express = require("express");
-const cors = require("cors");
-const bcrypt = require("bcrypt");
-const app = express();
-const PORT = process.env.PORT || 3000;
+// index.js (Complete Script for User + Provider functionality)
 
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+const binId = "68873c847b4b8670d8a87b72"; const masterKey = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy"; const apiUrl = https://api.jsonbin.io/v3/b/${binId};
 
-let providers = [];
+// USER SIDE (LOAD PROVIDERS + RATING SYSTEM) async function loadProviders() { const res = await fetch(apiUrl + "/latest", { headers: { "X-Master-Key": masterKey } }); const data = await res.json(); const providers = data.record;
 
-// ✅ Signup - Save Provider
-app.post("/signup", async (req, res) => {
-  const { name, mobile, password, category, description, image } = req.body;
-  const exists = providers.find(p => p.mobile === mobile);
-  if (exists) {
-    return res.status(400).json({ message: "Mobile number already exists" });
-  }
+const container = document.getElementById("providerList"); container.innerHTML = "";
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const newProvider = {
-    name,
-    mobile,
-    password: hashedPassword,
-    category,
-    description,
-    image,
-    rating: [],
-  };
+providers.forEach(p => { const card = document.createElement("div"); card.className = "provider-card"; card.innerHTML = <img src="${p.image || 'https://api.dicebear.com/7.x/icons/svg?seed=' + p.name}" height="50"> <h3>${p.name}</h3> <p><b>Category:</b> ${p.category}</p> <p>${p.description}</p> <p><b>Mobile:</b> <a href="tel:${p.mobile}">${p.mobile}</a> |  <a href="https://wa.me/91${p.mobile}" target="_blank">WhatsApp</a></p> <p><b>Rating:</b> ${p.rating || 0} ⭐</p> <select onchange="rateProvider('${p.mobile}', this.value)"> <option value="">Rate this provider</option> <option value="1">1 ⭐</option> <option value="2">2 ⭐</option> <option value="3">3 ⭐</option> <option value="4">4 ⭐</option> <option value="5">5 ⭐</option> </select>; container.appendChild(card); }); }
 
-  providers.push(newProvider);
-  res.json({ message: "Provider saved successfully" });
+// SAVE RATING async function rateProvider(mobile, rating) { const res = await fetch(apiUrl + "/latest", { headers: { "X-Master-Key": masterKey } }); const data = await res.json(); let providers = data.record;
+
+const index = providers.findIndex(p => p.mobile === mobile); if (index >= 0) { providers[index].rating = rating;
+
+await fetch(apiUrl, {
+  method: "PUT",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Master-Key": masterKey
+  },
+  body: JSON.stringify(providers)
 });
+alert("Rating updated!");
+loadProviders();
 
-// ✅ Login
-app.post("/login", async (req, res) => {
-  const { mobile, password } = req.body;
-  const provider = providers.find(p => p.mobile === mobile);
-  if (!provider) {
-    return res.status(404).json({ message: "Provider not found" });
-  }
+} }
 
-  const match = await bcrypt.compare(password, provider.password);
-  if (!match) {
-    return res.status(401).json({ message: "Wrong password" });
-  }
+// PROVIDER SIDE (SAVE ONLY - NO LOGIN) async function saveProvider() { const name = document.getElementById("name").value.trim(); const mobile = document.getElementById("mobile").value.trim(); const password = document.getElementById("password").value.trim(); const category = document.getElementById("category").value; const description = document.getElementById("description").value.trim(); const image = document.getElementById("image").value.trim();
 
-  res.json({ message: "Login successful", provider });
-});
+if (!mobile.match(/^\d{10}$/)) { alert("Please enter a valid 10-digit mobile number."); document.getElementById("mobile").focus(); return; }
 
-// ✅ Update Provider
-app.post("/update", async (req, res) => {
-  const { mobile, password, name, description, image, category } = req.body;
-  const provider = providers.find(p => p.mobile === mobile);
-  if (!provider) return res.status(404).json({ message: "Provider not found" });
+const res = await fetch(apiUrl + "/latest", { headers: { "X-Master-Key": masterKey } }); const data = await res.json(); let providers = data.record;
 
-  const match = await bcrypt.compare(password, provider.password);
-  if (!match) return res.status(401).json({ message: "Wrong password" });
+if (providers.some(p => p.mobile === mobile)) { alert("Mobile number already registered!"); return; }
 
-  provider.name = name || provider.name;
-  provider.description = description || provider.description;
-  provider.image = image || provider.image;
-  provider.category = category || provider.category;
+providers.push({ name, mobile, password, category, description, image, rating: 0 });
 
-  res.json({ message: "Provider updated" });
-});
+await fetch(apiUrl, { method: "PUT", headers: { "Content-Type": "application/json", "X-Master-Key": masterKey }, body: JSON.stringify(providers) });
 
-// ✅ Submit Rating
-app.post("/rate", (req, res) => {
-  const { mobile, rating } = req.body;
-  const provider = providers.find(p => p.mobile === mobile);
-  if (!provider) return res.status(404).json({ message: "Provider not found" });
+alert("Provider saved successfully!"); document.getElementById("name").value = ""; document.getElementById("mobile").value = ""; document.getElementById("password").value = ""; document.getElementById("category").value = ""; document.getElementById("description").value = ""; document.getElementById("image").value = ""; }
 
-  provider.rating.push(rating);
-  res.json({ message: "Rating submitted" });
-});
-
-// ✅ Get Providers by Category
-app.get("/providers", (req, res) => {
-  const { category } = req.query;
-  let filtered = providers;
-
-  if (category) {
-    filtered = providers.filter(p => p.category.toLowerCase() === category.toLowerCase());
-  }
-
-  const result = filtered.map(p => ({
-    name: p.name,
-    mobile: p.mobile,
-    category: p.category,
-    description: p.description,
-    image: p.image,
-    averageRating:
-      p.rating.length > 0 ? (p.rating.reduce((a, b) => a + b, 0) / p.rating.length).toFixed(1) : "N/A"
-  }));
-
-  res.json(result);
-});
-
-// ✅ Default
-app.get("/", (req, res) => {
-  res.send("Backend is running!");
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
