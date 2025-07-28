@@ -1,67 +1,57 @@
-const express = require('express');
-const cors = require('cors');
-const bcrypt = require('bcrypt');
+const express = require("express");
+const cors = require("cors");
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+let providers = []; // memory me data temporarily rakhenge
 
 app.use(cors());
 app.use(express.json());
 
-let providers = [];
-
-app.get('/', (req, res) => {
-  res.send("Service Backend Running");
-});
-
-// Get all providers
-app.get('/providers', (req, res) => {
-  res.json(providers);
-});
-
-// Signup a new provider
-app.post('/signup', async (req, res) => {
-  const { name, category, description, phone, lat, lng, password, photo } = req.body;
-
-  const exists = providers.find(p => p.phone === phone);
-  if (exists) return res.status(400).json({ message: 'Already registered' });
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const newProvider = { name, category, description, phone, lat, lng, photo, password: hashedPassword };
+// Signup endpoint
+app.post("/signup", (req, res) => {
+  const { name, photo, phone, password, description, lat, lng, category } = req.body;
+  const newProvider = { name, photo, phone, password, description, lat, lng, category, rating: 0 };
   providers.push(newProvider);
-  res.json({ message: 'Signup successful' });
+  res.json({ success: true, message: "Provider saved." });
 });
 
-// Login
-app.post('/login', async (req, res) => {
-  const { phone, password } = req.body;
-  const provider = providers.find(p => p.phone === phone);
-  if (!provider) return res.status(404).json({ message: 'Provider not found' });
+// Get nearby providers with category filter
+app.get("/nearby", (req, res) => {
+  const { lat, lng, category } = req.query;
+  const userLat = parseFloat(lat);
+  const userLng = parseFloat(lng);
 
-  const match = await bcrypt.compare(password, provider.password);
-  if (!match) return res.status(401).json({ message: 'Invalid password' });
+  function getDistance(lat1, lng1, lat2, lng2) {
+    const toRad = x => (x * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
 
-  res.json({ message: 'Login successful', provider });
+  const nearby = providers.filter(p => {
+    const d = getDistance(userLat, userLng, p.lat, p.lng);
+    return d <= 2 && (category === "" || p.category === category);
+  });
+
+  res.json(nearby);
 });
 
-// Update profile
-app.post('/update', async (req, res) => {
-  const { phone, password, name, category, description, photo } = req.body;
-
-  const provider = providers.find(p => p.phone === phone);
-  if (!provider) return res.status(404).json({ message: 'Provider not found' });
-
-  const match = await bcrypt.compare(password, provider.password);
-  if (!match) return res.status(401).json({ message: 'Invalid password' });
-
-  if (name) provider.name = name;
-  if (category) provider.category = category;
-  if (description) provider.description = description;
-  if (photo) provider.photo = photo;
-
-  res.json({ message: 'Update successful', provider });
+// Add rating to provider
+app.post("/rate", (req, res) => {
+  const { phone, rating } = req.body;
+  const p = providers.find(p => p.phone === phone);
+  if (p) {
+    p.rating = rating;
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: "Provider not found" });
+  }
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("Server running on", PORT);
 });
