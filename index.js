@@ -1,69 +1,40 @@
-const express = require("express");
-const cors = require("cors");
-const axios = require("axios");
-const app = express();
+// index.js (Render Backend - with Rating Save Support)
 
-app.use(cors());
-app.use(express.json());
+const express = require("express"); const fs = require("fs"); const cors = require("cors"); const app = express(); const PORT = process.env.PORT || 3000;
 
-const BIN_ID = "68873c847b4b8670d8a87b72";
-const MASTER_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
-const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+const FILE_PATH = "providers.json";
 
-// Get all providers
-app.get("/providers", async (req, res) => {
-  try {
-    const response = await axios.get(JSONBIN_URL + "/latest", {
-      headers: {
-        "X-Master-Key": MASTER_KEY,
-      },
-    });
-    const data = response.data.record || [];
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch data" });
-  }
-});
+app.use(cors()); app.use(express.json());
 
-// Add a new provider (no duplicate mobile)
-app.post("/providers", async (req, res) => {
-  const newProvider = req.body;
+// Helper function to read data from file function readProviders() { try { const data = fs.readFileSync(FILE_PATH); return JSON.parse(data); } catch (err) { return []; } }
 
-  if (!newProvider.name || !newProvider.mobile || !newProvider.lat || !newProvider.lon || !newProvider.category) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
+// Helper function to write data to file function writeProviders(data) { fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2)); }
 
-  try {
-    const response = await axios.get(JSONBIN_URL + "/latest", {
-      headers: {
-        "X-Master-Key": MASTER_KEY,
-      },
-    });
+// Route to get all providers app.get("/providers", (req, res) => { const providers = readProviders(); res.json(providers); });
 
-    const data = response.data.record || [];
+// Route to save new provider (append) app.post("/providers", (req, res) => { const { name, category, phone, whatsapp, lat, lon, rating } = req.body;
 
-    const exists = data.find(p => p.mobile === newProvider.mobile);
-    if (exists) {
-      return res.status(409).json({ error: "Mobile number already exists" });
-    }
+if (!name || !category || !phone || !lat || !lon) { return res.status(400).json({ message: "Missing required fields" }); }
 
-    newProvider.rating = 0;
-    data.push(newProvider);
+const providers = readProviders();
 
-    await axios.put(JSONBIN_URL, data, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Master-Key": MASTER_KEY,
-        "X-Bin-Versioning": "false"
-      },
-    });
+// Check duplicate phone const exists = providers.find((p) => p.phone === phone); if (exists) { return res.status(409).json({ message: "Provider with this phone already exists" }); }
 
-    res.json({ message: "Provider saved successfully" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to save provider" });
-  }
-});
+const newProvider = { name, category, phone, whatsapp: whatsapp || "", lat, lon, rating: rating || 0, ratingCount: 0 };
 
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
-});
+providers.push(newProvider); writeProviders(providers); res.json({ message: "Provider saved successfully" }); });
+
+// Route to update rating app.post("/rate", (req, res) => { const { phone, newRating } = req.body; if (!phone || typeof newRating !== "number") { return res.status(400).json({ message: "Invalid rating data" }); }
+
+const providers = readProviders(); const provider = providers.find((p) => p.phone === phone);
+
+if (!provider) { return res.status(404).json({ message: "Provider not found" }); }
+
+// Update average rating const total = provider.rating * provider.ratingCount; provider.ratingCount += 1; provider.rating = ((total + newRating) / provider.ratingCount).toFixed(1);
+
+writeProviders(providers); res.json({ message: "Rating updated successfully" }); });
+
+// Optional: Get backup of providers.json app.get("/backup", (req, res) => { const providers = readProviders(); res.json(providers); });
+
+// Start server app.listen(PORT, () => { console.log(Server running on port ${PORT}); });
+
