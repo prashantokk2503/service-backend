@@ -10,6 +10,7 @@ const BIN_ID = "68873c847b4b8670d8a87b72";
 const MASTER_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
 const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
+// Get all providers
 app.get("/providers", async (req, res) => {
   try {
     const response = await axios.get(JSONBIN_URL + "/latest", {
@@ -24,6 +25,7 @@ app.get("/providers", async (req, res) => {
   }
 });
 
+// Add a new provider (no duplicate mobile)
 app.post("/providers", async (req, res) => {
   const newProvider = req.body;
 
