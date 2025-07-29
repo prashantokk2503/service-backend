@@ -1,109 +1,98 @@
+// index.js
 const express = require("express");
-const axios = require("axios");
 const cors = require("cors");
+const axios = require("axios");
+
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-const BIN_ID = "68873c847b4b8670d8a87b72";
-const API_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
-const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Helper: Get providers from JSONBin
-async function getProviders() {
-  try {
-    const res = await axios.get(BASE_URL, {
-      headers: { "X-Master-Key": API_KEY }
-    });
-    return res.data.record || [];
-  } catch (err) {
-    return [];
-  }
-}
+const BIN_ID = "68884eda7b4b8670d8a901a5";
+const MASTER_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
+const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-// Helper: Save providers to JSONBin
-async function saveProviders(data) {
-  await axios.put(BASE_URL, data, {
-    headers: {
-      "Content-Type": "application/json",
-      "X-Master-Key": API_KEY,
-      "X-Bin-Private": false
-    }
-  });
-}
+const headers = {
+  "X-Master-Key": MASTER_KEY,
+  "Content-Type": "application/json"
+};
 
-// ✅ Route: Get all providers
+// ✅ GET all providers
 app.get("/providers", async (req, res) => {
-  const providers = await getProviders();
-  res.json(providers);
+  try {
+    const response = await axios.get(`${JSONBIN_URL}/latest`, { headers });
+    res.json(response.data.record);
+  } catch (err) {
+    console.error("GET Error:", err.message);
+    res.status(500).json({ message: "Failed to fetch providers" });
+  }
 });
 
-// ✅ Route: Save new provider
+// ✅ POST new provider
 app.post("/providers", async (req, res) => {
-  const { name, category, phone, whatsapp, lat, lon, rating, image } = req.body;
+  try {
+    const { phone } = req.body;
+    const response = await axios.get(`${JSONBIN_URL}/latest`, { headers });
+    const providers = response.data.record;
 
-  if (!name || !category || !phone || !lat || !lon) {
-    return res.status(400).json({ message: "Missing required fields" });
+    // Check duplicate
+    const existing = providers.find(p => p.phone === phone);
+    if (existing) {
+      return res.status(400).json({ message: "Provider with this phone already exists" });
+    }
+
+    providers.push(req.body);
+
+    await axios.put(JSONBIN_URL, providers, { headers });
+    res.json({ message: "Provider added successfully" });
+  } catch (err) {
+    console.error("POST Error:", err.message);
+    res.status(500).json({ message: "Failed to add provider" });
   }
-
-  const providers = await getProviders();
-
-  // Duplicate check
-  const exists = providers.find(p => p.phone === phone);
-  if (exists) {
-    return res.status(409).json({ message: "Phone already exists" });
-  }
-
-  const newProvider = {
-    name,
-    category,
-    phone,
-    whatsapp: whatsapp || "",
-    lat,
-    lon,
-    rating: rating || 0,
-    ratingCount: 0,
-    image: image || "https://cdn-icons-png.flaticon.com/512/4712/4712109.png"
-  };
-
-  providers.push(newProvider);
-  await saveProviders(providers);
-  res.json({ message: "Provider saved successfully" });
 });
 
-// ✅ Route: Update provider rating
+// ✅ PUT update provider (based on phone)
+app.put("/providers", async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const response = await axios.get(`${JSONBIN_URL}/latest`, { headers });
+    let providers = response.data.record;
+
+    const index = providers.findIndex(p => p.phone === phone);
+    if (index === -1) {
+      return res.status(404).json({ message: "Provider not found" });
+    }
+
+    providers[index] = req.body;
+
+    await axios.put(JSONBIN_URL, providers, { headers });
+    res.json({ message: "Provider updated successfully" });
+  } catch (err) {
+    console.error("PUT Error:", err.message);
+    res.status(500).json({ message: "Failed to update provider" });
+  }
+});
+
+// ✅ POST rating
 app.post("/rate", async (req, res) => {
-  const { phone, newRating } = req.body;
+  try {
+    const { phone, rating } = req.body;
+    const response = await axios.get(`${JSONBIN_URL}/latest`, { headers });
+    let providers = response.data.record;
 
-  if (!phone || typeof newRating !== "number") {
-    return res.status(400).json({ message: "Invalid rating data" });
+    const index = providers.findIndex(p => p.phone === phone);
+    if (index === -1) {
+      return res.status(404).json({ message: "Provider not found" });
+    }
+
+    providers[index].rating = parseFloat(rating);
+
+    await axios.put(JSONBIN_URL, providers, { headers });
+    res.json({ message: "Rating updated successfully" });
+  } catch (err) {
+    console.error("Rate Error:", err.message);
+    res.status(500).json({ message: "Failed to update rating" });
   }
-
-  const providers = await getProviders();
-  const provider = providers.find(p => p.phone === phone);
-
-  if (!provider) {
-    return res.status(404).json({ message: "Provider not found" });
-  }
-
-  const total = provider.rating * provider.ratingCount;
-  provider.ratingCount += 1;
-  provider.rating = parseFloat(((total + newRating) / provider.ratingCount).toFixed(1));
-
-  await saveProviders(providers);
-  res.json({ message: "Rating updated successfully" });
 });
 
-// ✅ Route: Backup
-app.get("/backup", async (req, res) => {
-  const data = await getProviders();
-  res.json(data);
-});
-
-// ✅ Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
