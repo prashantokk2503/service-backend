@@ -1,112 +1,83 @@
+const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
 const BIN_ID = "68884eda7b4b8670d8a901a5";
 const MASTER_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
-const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}/latest`;
-const UPDATE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-document.getElementById("searchBtn").addEventListener("click", async () => {
-  const category = document.getElementById("categoryFilter").value.trim().toLowerCase();
-  const userPosition = await getUserLocation();
-  const providers = await fetchProviders();
-
-  const nearby = providers
-    .filter(p => p.category.toLowerCase().includes(category))
-    .map(p => {
-      const dist = getDistance(userPosition.lat, userPosition.lon, p.lat, p.lon);
-      return { ...p, distance: dist };
-    })
-    .filter(p => p.distance <= 2) // 2km range
-    .sort((a, b) => b.rating - a.rating);
-
-  showProviders(nearby);
-});
-
-async function getUserLocation() {
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-      err => reject("GPS not allowed")
-    );
-  });
-}
-
-async function fetchProviders() {
+app.post("/save", async (req, res) => {
   try {
-    const res = await fetch(BIN_URL, {
+    const newProvider = req.body;
+
+    const response = await axios.get(JSONBIN_URL, {
       headers: { "X-Master-Key": MASTER_KEY }
     });
-    const data = await res.json();
-    return data.record || [];
+
+    let data = response.data.record || [];
+    const existing = data.find(p => p.mobile === newProvider.mobile);
+    if (existing) return res.status(409).json({ message: "Mobile already exists" });
+
+    data.push({ ...newProvider, ratings: [], avgRating: 0 });
+
+    await axios.put(JSONBIN_URL, data, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": MASTER_KEY
+      }
+    });
+
+    res.json({ message: "Saved successfully" });
   } catch (err) {
-    console.error("Fetch failed", err);
-    return [];
+    console.error(err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to save" });
   }
-}
+});
 
-function getDistance(lat1, lon1, lat2, lon2) {
-  const toRad = deg => deg * (Math.PI / 180);
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
-  return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2);
-}
-
-function showProviders(list) {
-  const div = document.getElementById("providerList");
-  div.innerHTML = "";
-  if (list.length === 0) {
-    div.innerHTML = "<p>No providers found.</p>";
-    return;
+app.get("/get", async (req, res) => {
+  try {
+    const response = await axios.get(JSONBIN_URL, {
+      headers: { "X-Master-Key": MASTER_KEY }
+    });
+    res.json(response.data.record || []);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch" });
   }
-  list.forEach(p => {
-    const avgRating = p.totalRated ? (p.rating / p.totalRated).toFixed(1) : "0";
-    const el = document.createElement("div");
-    el.className = "card";
-    el.innerHTML = `
-      <h3>${p.name} (${p.category})</h3>
-      <p>Distance: ${p.distance} km</p>
-      <p>Rating: ⭐ ${avgRating} (${p.totalRated || 0})</p>
-      <button onclick="call('${p.phone}')">Call</button>
-      <button onclick="whatsapp('${p.phone}')">WhatsApp</button>
-      <select onchange="rateProvider('${p.phone}', this.value)">
-        <option value="">Rate</option>
-        <option value="1">⭐1</option>
-        <option value="2">⭐2</option>
-        <option value="3">⭐3</option>
-        <option value="4">⭐4</option>
-        <option value="5">⭐5</option>
-      </select>
-    `;
-    div.appendChild(el);
-  });
-}
+});
 
-function call(phone) {
-  window.location.href = `tel:${phone}`;
-}
+app.post("/rate", async (req, res) => {
+  try {
+    const { mobile, rating } = req.body;
+    const response = await axios.get(JSONBIN_URL, {
+      headers: { "X-Master-Key": MASTER_KEY }
+    });
 
-function whatsapp(phone) {
-  window.location.href = `https://wa.me/91${phone}`;
-}
+    let data = response.data.record || [];
+    const provider = data.find(p => p.mobile === mobile);
+    if (!provider) return res.status(404).json({ error: "Provider not found" });
 
-async function rateProvider(phone, value) {
-  if (!value) return;
-  const providers = await fetchProviders();
-  const index = providers.findIndex(p => p.phone === phone);
-  if (index === -1) return alert("Provider not found");
+    provider.ratings.push(rating);
+    provider.avgRating = (provider.ratings.reduce((a, b) => a + b, 0) / provider.ratings.length).toFixed(1);
 
-  providers[index].rating = (providers[index].rating || 0) + Number(value);
-  providers[index].totalRated = (providers[index].totalRated || 0) + 1;
+    await axios.put(JSONBIN_URL, data, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": MASTER_KEY
+      }
+    });
 
-  await fetch(UPDATE_URL, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Master-Key": MASTER_KEY
-    },
-    body: JSON.stringify(providers)
-  });
+    res.json({ message: "Rated successfully" });
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(500).json({ error: "Rating failed" });
+  }
+});
 
-  alert("Thanks for rating!");
-  document.getElementById("searchBtn").click(); // Refresh list
-}
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
