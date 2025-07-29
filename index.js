@@ -1,109 +1,47 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// JSONBin credentials
 const BIN_ID = "68884eda7b4b8670d8a901a5";
 const MASTER_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
 const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-// Save new provider (only one entry per mobile number allowed)
 app.post("/save", async (req, res) => {
+  const { name, category, mobile, lat, lon } = req.body;
+  if (!name || !category || !mobile || !lat || !lon) {
+    return res.json({ message: "All fields including location are required" });
+  }
+
   try {
-    const newProvider = req.body;
-
-    // Get current data
-    const response = await axios.get(BIN_URL, {
-      headers: { "X-Master-Key": MASTER_KEY }
+    const getRes = await fetch(BIN_URL + "/latest", {
+      headers: { "X-Master-Key": MASTER_KEY },
     });
+    const json = await getRes.json();
+    const providers = json.record || [];
 
-    let providers = response.data.record || [];
+    const exists = providers.find(p => p.mobile === mobile);
+    if (exists) return res.json({ message: "Mobile number already registered" });
 
-    // Check for duplicate mobile number
-    const exists = providers.some(p => p.mobile === newProvider.mobile);
-    if (exists) {
-      return res.status(400).json({ message: "Mobile number already exists" });
-    }
+    providers.push({ name, category, mobile, lat, lon, rating: 0, ratedBy: 0 });
 
-    // Save provider with default ratings
-    providers.push({
-      name: newProvider.name,
-      mobile: newProvider.mobile,
-      category: newProvider.category,
-      description: newProvider.description,
-      ratings: [],
-      avgRating: 0
-    });
-
-    await axios.put(BIN_URL, providers, {
+    const updateRes = await fetch(BIN_URL, {
+      method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "X-Master-Key": MASTER_KEY
-      }
+        "X-Master-Key": MASTER_KEY,
+        "X-Bin-Private": "false"
+      },
+      body: JSON.stringify(providers),
     });
 
-    res.json({ message: "Provider saved successfully" });
+    if (!updateRes.ok) throw new Error("Failed to update");
 
+    res.json({ message: "Provider saved successfully." });
   } catch (err) {
-    console.error("Save Error:", err.message);
-    res.status(500).json({ message: "Failed to save provider" });
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
-// Get all providers
-app.get("/get", async (req, res) => {
-  try {
-    const response = await axios.get(BIN_URL, {
-      headers: { "X-Master-Key": MASTER_KEY }
-    });
-    res.json(response.data.record || []);
-  } catch (err) {
-    console.error("Get Error:", err.message);
-    res.status(500).json({ message: "Failed to fetch providers" });
-  }
-});
-
-// Rate a provider
-app.post("/rate", async (req, res) => {
-  try {
-    const { mobile, rating } = req.body;
-
-    const response = await axios.get(BIN_URL, {
-      headers: { "X-Master-Key": MASTER_KEY }
-    });
-
-    let providers = response.data.record || [];
-    const provider = providers.find(p => p.mobile === mobile);
-
-    if (!provider) {
-      return res.status(404).json({ message: "Provider not found" });
-    }
-
-    provider.ratings.push(rating);
-    provider.avgRating = (
-      provider.ratings.reduce((sum, r) => sum + r, 0) / provider.ratings.length
-    ).toFixed(1);
-
-    await axios.put(BIN_URL, providers, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Master-Key": MASTER_KEY
-      }
-    });
-
-    res.json({ message: "Rating submitted" });
-
-  } catch (err) {
-    console.error("Rate Error:", err.message);
-    res.status(500).json({ message: "Failed to rate provider" });
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+app.listen(3000, () => console.log("Server running on port 3000"));
