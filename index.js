@@ -1,88 +1,112 @@
 const express = require("express");
-const cors = require("cors");
 const axios = require("axios");
+const cors = require("cors");
 
 const app = express();
+const port = process.env.PORT || 3000;
+
 app.use(cors());
 app.use(express.json());
 
+// ✅ JSONBin credentials
 const BIN_ID = "68884eda7b4b8670d8a901a5";
 const MASTER_KEY = "$2a$10$BmHlO2lZfKiJi1TDS4T2yOIV8QZqGkHDjzOAvTHbLvwx62enbybsy";
-const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-// ✅ GET all providers
-app.get("/get", async (req, res) => {
-  try {
-    const response = await axios.get(BASE_URL + "/latest", {
-      headers: {
-        "X-Master-Key": MASTER_KEY,
-      },
-    });
-    res.json(response.data.record);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch data" });
-  }
-});
-
-// ✅ POST new provider (append)
+// ✅ Save provider (append to JSONBin)
 app.post("/save", async (req, res) => {
   try {
-    const newData = req.body;
+    const newProvider = req.body;
 
-    const response = await axios.get(BASE_URL + "/latest", {
-      headers: { "X-Master-Key": MASTER_KEY },
+    // get existing data
+    const response = await axios.get(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: {
+        "X-Master-Key": MASTER_KEY
+      }
     });
 
-    const currentData = response.data.record;
+    let data = response.data.record || [];
 
-    const exists = currentData.some(p => p.phone === newData.phone);
-    if (exists) return res.status(400).json({ message: "Mobile already exists" });
+    // ✅ prevent duplicate phone numbers
+    const exists = data.find(p => p.phone === newProvider.phone);
+    if (exists) {
+      return res.status(400).json({ message: "Provider already exists with this phone number." });
+    }
 
-    currentData.push(newData);
+    data.push(newProvider);
 
-    await axios.put(BASE_URL, currentData, {
+    // update bin
+    await axios.put(`https://api.jsonbin.io/v3/b/${BIN_ID}`, data, {
       headers: {
         "Content-Type": "application/json",
-        "X-Master-Key": MASTER_KEY,
-      },
+        "X-Master-Key": MASTER_KEY
+      }
     });
 
-    res.json({ message: "Saved successfully" });
+    res.json({ message: "Provider saved successfully." });
   } catch (err) {
-    res.status(500).json({ error: "Failed to save data" });
+    console.error("Error saving provider:", err.message);
+    res.status(500).json({ message: "Failed to save provider." });
   }
 });
 
-// ✅ POST rating update
-app.post("/rate", async (req, res) => {
+// ✅ Get all providers
+app.get("/get", async (req, res) => {
   try {
-    const { phone, rating } = req.body;
-
-    const response = await axios.get(BASE_URL + "/latest", {
-      headers: { "X-Master-Key": MASTER_KEY },
-    });
-
-    const data = response.data.record;
-
-    const index = data.findIndex(p => p.phone === phone);
-    if (index === -1) return res.status(404).json({ message: "Provider not found" });
-
-    data[index].rating = rating;
-
-    await axios.put(BASE_URL, data, {
+    const response = await axios.get(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
       headers: {
-        "Content-Type": "application/json",
-        "X-Master-Key": MASTER_KEY,
-      },
+        "X-Master-Key": MASTER_KEY
+      }
     });
 
-    res.json({ message: "Rating updated" });
+    const data = response.data.record || [];
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Failed to update rating" });
+    console.error("Error fetching data:", err.message);
+    res.status(500).json({ message: "Failed to fetch data." });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
+// ✅ Save rating
+app.post("/rate", async (req, res) => {
+  const { phone, newRating } = req.body;
+
+  try {
+    const response = await axios.get(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: {
+        "X-Master-Key": MASTER_KEY
+      }
+    });
+
+    let data = response.data.record;
+
+    let provider = data.find(p => p.phone === phone);
+    if (!provider) {
+      return res.status(404).json({ message: "Provider not found." });
+    }
+
+    // rating logic
+    if (!provider.ratingCount) {
+      provider.ratingCount = 1;
+      provider.rating = newRating;
+    } else {
+      provider.rating = ((provider.rating * provider.ratingCount) + newRating) / (provider.ratingCount + 1);
+      provider.ratingCount += 1;
+    }
+
+    await axios.put(`https://api.jsonbin.io/v3/b/${BIN_ID}`, data, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": MASTER_KEY
+      }
+    });
+
+    res.json({ message: "Rating updated successfully." });
+  } catch (err) {
+    console.error("Error rating provider:", err.message);
+    res.status(500).json({ message: "Failed to update rating." });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
